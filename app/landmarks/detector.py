@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import urllib.request
 from pathlib import Path
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 import cv2
 import mediapipe as mp
@@ -24,6 +24,12 @@ from app.landmarks.indices import (
     LEFT_EYE_CONTOUR,
     RIGHT_EYE_EAR,
     LEFT_EYE_EAR,
+    RIGHT_EYE_IRIS_CENTER,
+    LEFT_EYE_IRIS_CENTER,
+    RIGHT_EYE_OUTER,
+    RIGHT_EYE_INNER,
+    LEFT_EYE_OUTER,
+    LEFT_EYE_INNER,
     POSE_KEYPOINTS,
     FACE_3D_MODEL,
     FACE_OVAL,
@@ -114,6 +120,7 @@ class LandmarkDetector:
         if len(faces) > 1:
             lm = faces[0]
             bbox = self._face_bbox(lm, h, w)
+            gz = self._gaze_iris_t(lm)
             return DetectionResult(
                 status=DetectionStatus.MULTIPLE_FACES,
                 confidence=self._confidence(bbox, h, w),
@@ -122,6 +129,7 @@ class LandmarkDetector:
                 left_eye=self._eye(lm, LEFT_EYE_CONTOUR, LEFT_EYE_EAR, h, w),
                 head_pose=self._head_pose(lm, h, w),
                 raw_landmarks=None,
+                gaze_iris_t=gz,
             )
 
         lm = faces[0]
@@ -130,17 +138,20 @@ class LandmarkDetector:
         # ── face too small ────────────────────────────────────────────────
         bx, by, bw, bh = bbox
         if (bw * bh) / (w * h) < self.min_face_size_ratio:
+            gz = self._gaze_iris_t(lm)
             return DetectionResult(
                 status=DetectionStatus.FACE_TOO_SMALL,
                 confidence=self._confidence(bbox, h, w),
                 face_bbox=bbox,
                 raw_landmarks=None,
+                gaze_iris_t=gz,
             )
 
         head_pose = self._head_pose(lm, h, w)
         right_eye = self._eye(lm, RIGHT_EYE_CONTOUR, RIGHT_EYE_EAR, h, w)
         left_eye = self._eye(lm, LEFT_EYE_CONTOUR, LEFT_EYE_EAR, h, w)
         confidence = self._confidence(bbox, h, w)
+        gz = self._gaze_iris_t(lm)
 
         # ── bad angle ─────────────────────────────────────────────────────
         if not head_pose.is_frontal(self.max_yaw_degrees, self.max_pitch_degrees):
@@ -152,6 +163,7 @@ class LandmarkDetector:
                 left_eye=left_eye,
                 head_pose=head_pose,
                 raw_landmarks=None,
+                gaze_iris_t=gz,
             )
 
         return DetectionResult(
@@ -162,6 +174,7 @@ class LandmarkDetector:
             left_eye=left_eye,
             head_pose=head_pose,
             raw_landmarks=None,
+            gaze_iris_t=gz,
         )
 
     def draw(self, frame: np.ndarray, result: DetectionResult) -> np.ndarray:
@@ -287,6 +300,45 @@ class LandmarkDetector:
         _, _, bw, bh = bbox
         ratio = (bw * bh) / (w * h)
         return float(np.clip(ratio / 0.30, 0.05, 1.0))
+
+    @staticmethod
+    def _iris_t_along(
+        lm: Sequence,
+        outer_idx: int,
+        inner_idx: int,
+        iris_idx: int,
+    ) -> Optional[float]:
+        try:
+            ox, oy = lm[outer_idx].x, lm[outer_idx].y
+            ix, iy = lm[inner_idx].x, lm[inner_idx].y
+            px, py = lm[iris_idx].x, lm[iris_idx].y
+        except (IndexError, AttributeError):
+            return None
+        vx, vy = ix - ox, iy - oy
+        L2 = vx * vx + vy * vy
+        if L2 < 1e-12:
+            return None
+        t = ((px - ox) * vx + (py - oy) * vy) / L2
+        return float(np.clip(t, 0.0, 1.0))
+
+    @classmethod
+    def _gaze_iris_t(cls, lm: Sequence) -> Optional[Tuple[float, float]]:
+        need = (
+            max(
+                RIGHT_EYE_IRIS_CENTER,
+                LEFT_EYE_IRIS_CENTER,
+                RIGHT_EYE_INNER,
+                LEFT_EYE_INNER,
+            )
+            + 1
+        )
+        if len(lm) < need:
+            return None
+        tr = cls._iris_t_along(lm, RIGHT_EYE_OUTER, RIGHT_EYE_INNER, RIGHT_EYE_IRIS_CENTER)
+        tl = cls._iris_t_along(lm, LEFT_EYE_OUTER, LEFT_EYE_INNER, LEFT_EYE_IRIS_CENTER)
+        if tr is None or tl is None:
+            return None
+        return (tr, tl)
 
     @staticmethod
     def _draw_eye(frame: np.ndarray, eye: EyeLandmarks, colour: tuple):

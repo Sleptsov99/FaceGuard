@@ -78,6 +78,7 @@ class EngineThread(QThread):
                 d = result.detection
                 m = result.metrics
                 r = result.distraction
+                cs = result.calibration_state
                 payload: Dict[str, Any] = {
                     "frame_index": result.frame_index,
                     "detection_status": d.status.value,
@@ -89,12 +90,15 @@ class EngineThread(QThread):
                     "fatigue_level": m.fatigue_level.name if m else None,
                     "fatigue_score": float(m.fatigue_score) if m else None,
                     "distraction_reason": r.reason.value,
+                    "distraction_score": float(r.distraction_score),
                     "is_distracted": bool(r.is_distracted),
                     "face_present": bool(r.face_present),
                     "face_absent_ms": float(r.face_absent_ms),
                     "closure_streak_ms": closure_streak_ms,
                     "state_left": m.state_left.name if m else None,
                     "state_right": m.state_right.name if m else None,
+                    "calibration_state": cs.value if cs is not None else None,
+                    "calibration_progress": float(result.calibration_progress),
                 }
                 return payload
 

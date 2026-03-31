@@ -82,7 +82,7 @@ def run(
 ):
     calculator = MetricsCalculator()
     distraction = DistractionTracker()
-    calibration = CalibrationSession(duration_seconds=45.0)
+    calibration = CalibrationSession(duration_seconds=30.0, min_valid_seconds=12.0)
     cv_state = CVStateEstimator()
     stdin_q = _start_stdin_reader()
 
@@ -106,7 +106,7 @@ def run(
         ws.start()
 
     print("CV Engine running.")
-    print("  c + Enter  — start calibration")
+    print("  c + Enter  — start / restart calibration (~30 s)")
     print("  q + Enter  — quit")
     if ws:
         print(f"  WebSocket   — ws://localhost:{ws_port}")
@@ -128,7 +128,7 @@ def run(
 
         detection = detector.detect(frame)
         metrics = calculator.update(detection, timestamp_ms=ts)
-        distr = distraction.update(detection, timestamp_ms=ts)
+        distr = distraction.update(detection, timestamp_ms=ts, metrics=metrics)
         state = cv_state.estimate(metrics, distr)
         quality = compute_quality_flags(detection, metrics)
 
@@ -256,7 +256,7 @@ def main():
         source = 0
 
     if args.headless:
-        session = EngineSession(source)
+        session = EngineSession(source, auto_calibration=False)
         try:
             session.run_loop(preview=False)
         finally:

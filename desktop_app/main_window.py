@@ -70,17 +70,21 @@ class MainWindow(QMainWindow):
         self._lbl_status = QLabel("Engine: —")
         self._lbl_blink = QLabel("Blinks (total): 0")
         self._lbl_detection = QLabel("Detection: —")
+        self._lbl_calibration = QLabel("Калибровка: —")
         self._lbl_fatigue_distraction = QLabel("Fatigue / distraction: —")
+        self._calibration_done = False
         for w in (
             self._lbl_status,
             self._lbl_blink,
             self._lbl_detection,
+            self._lbl_calibration,
             self._lbl_fatigue_distraction,
         ):
             w.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self._lbl_status)
         layout.addWidget(self._lbl_blink)
         layout.addWidget(self._lbl_detection)
+        layout.addWidget(self._lbl_calibration)
         layout.addWidget(self._lbl_fatigue_distraction)
 
         self._alert_banner = QLabel("")
@@ -153,6 +157,7 @@ class MainWindow(QMainWindow):
             return
 
     def on_engine_started(self) -> None:
+        self._calibration_done = False
         self._btn_start.setEnabled(False)
         self._btn_stop.setEnabled(True)
         self._lbl_status.setText("Engine: running")
@@ -162,17 +167,21 @@ class MainWindow(QMainWindow):
         self._append_log("Мониторинг запущен.")
 
     def on_engine_stopped(self) -> None:
+        self._calibration_done = False
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
         self._lbl_status.setText("Engine: idle")
+        self._lbl_calibration.setText("Калибровка: —")
         self._clear_preview()
         self._append_log("Мониторинг остановлен.")
 
     def on_worker_thread_finished(self) -> None:
         """Worker ended on its own (camera lost, error path, etc.)."""
+        self._calibration_done = False
         self._btn_start.setEnabled(True)
         self._btn_stop.setEnabled(False)
         self._lbl_status.setText("Engine: остановлено")
+        self._lbl_calibration.setText("Калибровка: —")
         self._clear_preview()
         self._append_log("Поток движка завершён.")
 
@@ -195,11 +204,32 @@ class MainWindow(QMainWindow):
         fscore = payload["fatigue_score"]
         fscore_s = f"{fscore:.2f}" if fscore is not None else "—"
         eyes = f"{payload.get('state_left') or '—'} / {payload.get('state_right') or '—'}"
+        dscore = float(payload.get("distraction_score") or 0.0)
         self._lbl_fatigue_distraction.setText(
             f"Fatigue: {fatigue} ({fscore_s})  PERCLOS30: {perclos_s}  |  "
-            f"Distracted: {payload['is_distracted']}  reason: {payload['distraction_reason']}\n"
+            f"Distracted: {payload['is_distracted']}  score: {dscore:.2f}  "
+            f"reason: {payload['distraction_reason']}\n"
             f"Eyes: {eyes}  closure_streak: {payload.get('closure_streak_ms', 0):.0f} ms"
         )
+        cs = payload.get("calibration_state")
+        cp = float(payload.get("calibration_progress") or 0.0)
+        if cs == "running":
+            self._lbl_calibration.setText(
+                f"Калибровка (~30 с): {int(cp * 100)}% — смотрите в экран, не отворачивайтесь"
+            )
+        elif cs == "done":
+            self._calibration_done = True
+            self._lbl_calibration.setText(
+                "Калибровка: завершена. Пороги усталости и взгляда персональные."
+            )
+        elif cs == "failed":
+            self._lbl_calibration.setText(
+                "Калибровка: мало валидных кадров. Стандартные пороги."
+            )
+        elif self._calibration_done:
+            self._lbl_calibration.setText("Калибровка: применена")
+        else:
+            self._lbl_calibration.setText("Калибровка: —")
         if payload.get("blink_this_frame"):
             self._append_log(
                 f"Frame {payload['frame_index']}: blink (total {payload['blink_total']})"

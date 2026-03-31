@@ -19,12 +19,16 @@ Confidence gating:
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import cv2
 import numpy as np
 
 from app.landmarks.result import DetectionResult, DetectionStatus
+from app.metrics.ear import EyeState
+
+if TYPE_CHECKING:
+    from app.metrics.result import EyeMetrics
 
 
 # ─── result types ────────────────────────────────────────────────────────────
@@ -34,6 +38,7 @@ class DistractionReason(Enum):
     FACE_ABSENT    = "face_absent"     # no face detected
     LOOKING_AWAY   = "looking_away"    # |yaw| or |pitch| above threshold
     HEAD_TILTED    = "head_tilted"     # |roll| above threshold
+    EYE_GAZE_OFF   = "eye_gaze_off"    # отклонение радужки от персональной нормы
     LOW_CONFIDENCE = "low_confidence"  # face present but data unreliable
 
 
@@ -96,7 +101,12 @@ class DistractionTracker:
         # Personal baseline (updated by apply_calibration)
         self._yaw_mean:   float = 0.0
         self._pitch_mean: float = 0.0
-        self._roll_mean:  float = 0.0
+        self._roll_mean: float = 0.0
+
+        self._gaze_enabled: bool = False
+        self._gaze_mean_r: float = 0.5
+        self._gaze_mean_l: float = 0.5
+        self._gaze_threshold: float = 1.0
 
         self._face_absent_since_ms: Optional[float] = None
 
@@ -106,6 +116,9 @@ class DistractionTracker:
         self,
         detection: DetectionResult,
         timestamp_ms: Optional[float] = None,
+        metrics: Optional["EyeMetrics"] = None,
+        *,
+        calibration_suppress: bool = False,
     ) -> DistractionResult:
         """Process every frame regardless of DetectionStatus."""
         if timestamp_ms is None:
@@ -157,27 +170,63 @@ class DistractionTracker:
             and roll_dev > self.roll_threshold
         )
 
+        pose_score = 0.0
+        pose_reason = DistractionReason.NONE
+        if is_looking_away:
+            pose_score = self._pose_score(yaw_dev, pitch_dev, roll_dev)
+            pose_reason = DistractionReason.LOOKING_AWAY
+        elif is_head_tilted:
+            pose_score = self._pose_score(yaw_dev, pitch_dev, roll_dev)
+            pose_reason = DistractionReason.HEAD_TILTED
+
+        gaze_score = 0.0
+        gaze_hit = False
+        if (
+            self._gaze_enabled
+            and face_present
+            and not is_low_confidence
+            and metrics is not None
+            and metrics.state_left == EyeState.OPEN
+            and metrics.state_right == EyeState.OPEN
+            and detection.gaze_iris_t is not None
+        ):
+            tr, tl = detection.gaze_iris_t
+            dev = max(abs(tr - self._gaze_mean_r), abs(tl - self._gaze_mean_l))
+            # Небольшой зазор, чтобы шум около порога не щёлкал distract каждый кадр
+            slack = max(self._gaze_threshold * 0.06, 0.012)
+            if dev > self._gaze_threshold + slack:
+                gaze_hit = True
+                excess = dev - self._gaze_threshold
+                # Медленный рост score: до ~1.0 нужно заметно больше, чем сам порог
+                denom = max(1.85 * self._gaze_threshold, 0.14)
+                gaze_score = min(excess / denom, 1.0)
+
         # ── distraction score + reason ────────────────────────────────────────
         if not face_present:
-            score  = min(absent_ms / self.absence_alert_ms, 1.0)
+            score = min(absent_ms / self.absence_alert_ms, 1.0)
             reason = DistractionReason.FACE_ABSENT
         elif is_low_confidence:
-            score  = 0.0
+            score = 0.0
             reason = DistractionReason.LOW_CONFIDENCE
-        elif is_looking_away:
-            score  = self._pose_score(yaw_dev, pitch_dev, roll_dev)
-            reason = DistractionReason.LOOKING_AWAY
-        elif is_head_tilted:
-            score  = self._pose_score(yaw_dev, pitch_dev, roll_dev)
-            reason = DistractionReason.HEAD_TILTED
         else:
-            score  = 0.0
+            score = max(pose_score, gaze_score)
+            if pose_score >= gaze_score and pose_reason != DistractionReason.NONE:
+                reason = pose_reason
+            elif gaze_hit:
+                reason = DistractionReason.EYE_GAZE_OFF
+            else:
+                score = 0.0
+                reason = DistractionReason.NONE
+
+        if calibration_suppress and face_present:
+            score = 0.0
             reason = DistractionReason.NONE
 
         is_distracted = reason in (
             DistractionReason.FACE_ABSENT,
             DistractionReason.LOOKING_AWAY,
             DistractionReason.HEAD_TILTED,
+            DistractionReason.EYE_GAZE_OFF,
         )
 
         return DistractionResult(
@@ -253,9 +302,13 @@ class DistractionTracker:
         self._yaw_mean      = profile.yaw_mean
         self._pitch_mean    = profile.pitch_mean
         self._roll_mean     = profile.roll_mean
-        self.yaw_threshold  = profile.yaw_threshold
+        self.yaw_threshold = profile.yaw_threshold
         self.pitch_threshold = profile.pitch_threshold
-        self.roll_threshold  = profile.roll_threshold
+        self.roll_threshold = profile.roll_threshold
+        self._gaze_enabled = profile.gaze_enabled
+        self._gaze_mean_r = profile.gaze_t_mean_right
+        self._gaze_mean_l = profile.gaze_t_mean_left
+        self._gaze_threshold = profile.gaze_threshold
 
     def reset(self):
         self._face_absent_since_ms = None

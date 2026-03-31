@@ -18,6 +18,7 @@ from app.landmarks.detector import LandmarkDetector
 from app.landmarks.result import DetectionResult, DetectionStatus, HeadPose
 from app.metrics.calculator import MetricsCalculator
 from app.metrics.result import EyeMetrics
+from app.state.calibration import CalibrationSession, CalibrationState
 from app.state.distraction import DistractionResult, DistractionTracker
 
 
@@ -41,6 +42,8 @@ class FrameProcessingResult:
     distraction: DistractionResult
     timestamp_ms: float
     frame_index: int
+    calibration_state: Optional[CalibrationState] = None
+    calibration_progress: float = 0.0
 
 
 def _summarize_detection(result: DetectionResult) -> DetectionSummary:
@@ -60,12 +63,25 @@ class EngineSession:
     instance per thread and do not share it across threads.
     """
 
-    def __init__(self, source: Union[int, str]):
+    def __init__(
+        self,
+        source: Union[int, str],
+        *,
+        auto_calibration: bool = True,
+        calibration_duration_s: float = 30.0,
+        calibration_min_valid_s: float = 12.0,
+    ):
         self._capture = CameraCapture(source=source)
         self._detector = LandmarkDetector()
         self._calculator = MetricsCalculator()
         self._distraction = DistractionTracker()
         self._frame_index = 0
+        self._calibration: Optional[CalibrationSession] = None
+        if auto_calibration:
+            self._calibration = CalibrationSession(
+                duration_seconds=calibration_duration_s,
+                min_valid_seconds=calibration_min_valid_s,
+            )
 
     @property
     def capture(self) -> CameraCapture:
@@ -108,12 +124,44 @@ class EngineSession:
 
         detection = self._detector.detect(frame)
         metrics = self._calculator.update(detection, timestamp_ms=ts)
-        distr = self._distraction.update(detection, timestamp_ms=ts)
+
+        cal_state: Optional[CalibrationState] = None
+        cal_progress = 0.0
+        suppress_distr = False
+
+        if self._calibration is not None:
+            c = self._calibration
+            if c.state == CalibrationState.IDLE:
+                c.start(ts)
+            cal_progress = c.progress_at(ts)
+            cal_state = c.state
+            if c.state == CalibrationState.RUNNING:
+                suppress_distr = True
+                nst = c.update(detection, metrics, timestamp_ms=ts)
+                cal_state = nst
+                cal_progress = c.progress_at(ts)
+                if nst == CalibrationState.DONE:
+                    prof = c.finish()
+                    if prof:
+                        self._calculator.apply_calibration(prof)
+                        self._distraction.apply_calibration(prof)
+                    self._calibration = None
+                elif nst == CalibrationState.FAILED:
+                    self._calibration = None
+
+        distr = self._distraction.update(
+            detection,
+            timestamp_ms=ts,
+            metrics=metrics,
+            calibration_suppress=suppress_distr,
+        )
 
         if draw_overlays:
             self._detector.draw(frame, detection)
             self._calculator.draw(frame, metrics)
             self._distraction.draw(frame, distr)
+            if self._calibration is not None:
+                self._calibration.draw(frame, timestamp_ms=ts)
 
         return FrameProcessingResult(
             frame=frame,
@@ -122,6 +170,8 @@ class EngineSession:
             distraction=distr,
             timestamp_ms=ts,
             frame_index=idx,
+            calibration_state=cal_state,
+            calibration_progress=cal_progress,
         )
 
     def run_loop(

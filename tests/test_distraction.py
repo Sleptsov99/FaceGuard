@@ -2,6 +2,7 @@
 
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -9,6 +10,9 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.landmarks.result import DetectionResult, DetectionStatus, HeadPose
+from app.metrics.ear import EyeState
+from app.metrics.result import EyeMetrics, FatigueLevel
+from app.state.calibration import CalibrationProfile
 from app.state.distraction import DistractionTracker, DistractionReason
 
 
@@ -35,6 +39,33 @@ def _detection(
 
 def _no_face() -> DetectionResult:
     return DetectionResult(status=DetectionStatus.NO_FACE, confidence=0.0)
+
+
+def _metrics_open() -> EyeMetrics:
+    return EyeMetrics(
+        ear_left=0.30,
+        ear_right=0.30,
+        ear_avg=0.30,
+        ear_left_smooth=0.30,
+        ear_right_smooth=0.30,
+        ear_avg_smooth=0.30,
+        ear_baseline=0.30,
+        ear_deviation=0.0,
+        state_left=EyeState.OPEN,
+        state_right=EyeState.OPEN,
+        blink_detected=False,
+        blink_duration_ms=0.0,
+        blink_rate_30s=0.0,
+        blink_rate_60s=0.0,
+        avg_blink_duration_ms=0.0,
+        long_blink_count=0,
+        perclos_30s=0.0,
+        perclos_60s=0.0,
+        long_closure_count_60s=0,
+        total_closure_time_60s_ms=0.0,
+        fatigue_score=0.0,
+        fatigue_level=FatigueLevel.ALERT,
+    )
 
 
 # ─── face presence tests ──────────────────────────────────────────────────────
@@ -245,6 +276,63 @@ class TestDistractionDraw(unittest.TestCase):
         r = self.tracker.update(_detection(yaw=45.0), _ts(0))
         out = self.tracker.draw(self._frame(), r)
         self.assertEqual(out.shape, (480, 640, 3))
+
+
+# ─── eye gaze (post-calibration) ─────────────────────────────────────────────
+
+
+class TestEyeGazeDistraction(unittest.TestCase):
+    def _gaze_profile(self) -> CalibrationProfile:
+        return CalibrationProfile(
+            ear_mean=0.32,
+            ear_std=0.02,
+            ear_closed_threshold=0.12,
+            ear_blink_threshold=0.17,
+            blink_duration_mean_ms=130.0,
+            blink_duration_std_ms=30.0,
+            long_blink_threshold_ms=350.0,
+            yaw_mean=0.0,
+            pitch_mean=0.0,
+            roll_mean=0.0,
+            pose_std=3.0,
+            yaw_threshold=30.0,
+            pitch_threshold=30.0,
+            roll_threshold=20.0,
+            gaze_t_mean_right=0.5,
+            gaze_t_mean_left=0.5,
+            gaze_threshold=0.08,
+            gaze_enabled=True,
+            sample_count=100,
+            duration_ms=30_000.0,
+        )
+
+    def test_gaze_off_when_iris_deviates(self):
+        d = DistractionTracker()
+        d.apply_calibration(self._gaze_profile())
+        det = DetectionResult(
+            status=DetectionStatus.OK,
+            confidence=0.9,
+            head_pose=HeadPose(yaw=0.0, pitch=0.0, roll=0.0),
+            gaze_iris_t=(0.85, 0.48),
+        )
+        r = d.update(det, _ts(0), metrics=_metrics_open())
+        self.assertEqual(r.reason, DistractionReason.EYE_GAZE_OFF)
+        self.assertTrue(r.is_distracted)
+        self.assertGreater(r.distraction_score, 0.15)
+
+    def test_gaze_ignored_when_disabled(self):
+        d = DistractionTracker()
+        p = replace(self._gaze_profile(), gaze_enabled=False, gaze_threshold=1.0)
+        d.apply_calibration(p)
+        det = DetectionResult(
+            status=DetectionStatus.OK,
+            confidence=0.9,
+            head_pose=HeadPose(yaw=0.0, pitch=0.0, roll=0.0),
+            gaze_iris_t=(0.95, 0.50),
+        )
+        r = d.update(det, _ts(0), metrics=_metrics_open())
+        self.assertEqual(r.reason, DistractionReason.NONE)
+        self.assertFalse(r.is_distracted)
 
 
 if __name__ == "__main__":

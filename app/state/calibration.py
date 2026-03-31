@@ -1,11 +1,12 @@
 """
 User calibration — Stage 6.
 
-A 30–60 second baseline session during which the user looks at the screen
-normally.  The session collects:
+A baseline session (desktop: **30 s** by default) while the user looks at the
+screen normally.  The session collects:
   - open-eye EAR distribution   → personalised closed / blink EAR thresholds
   - blink duration distribution → personalised long-blink threshold
   - head pose distribution      → personalised looking-away thresholds
+  - iris position along each eye (478 mesh) → personalised gaze deviation threshold
 
 Thresholds are derived as  mean ± k·σ  and clamped to physiologically
 reasonable ranges so extreme faces or head positions can't produce
@@ -70,9 +71,15 @@ class CalibrationProfile:
     pitch_threshold: float
     roll_threshold:  float
 
+    # ── Gaze (iris position along eye aperture, t ∈ [0,1]) ────────────────────
+    gaze_t_mean_right: float
+    gaze_t_mean_left: float
+    gaze_threshold: float  # max(|t−mean|) порог; 1.0 = выключено
+    gaze_enabled: bool
+
     # ── Session metadata ──────────────────────────────────────────────────────
     sample_count: int
-    duration_ms:  float
+    duration_ms: float
 
     @property
     def is_valid(self) -> bool:
@@ -97,32 +104,42 @@ class CalibrationSession:
         Sigma multiplier for head-pose thresholds (default 2.0).
     min_pose_margin : float
         Minimum degrees added beyond mean for pose thresholds.
+    k_gaze : float
+        Множитель σ для порога отклонения взгляда (меньше → чувствительнее).
+    min_gaze_margin : float
+        Минимальный порог в t-пространстве [0,1] поверх k·σ.
     """
 
     def __init__(
         self,
-        duration_seconds:   float = 45.0,
-        min_valid_seconds:  float = 20.0,
-        k_ear:  float = 2.0,
+        duration_seconds: float = 45.0,
+        min_valid_seconds: float = 20.0,
+        k_ear: float = 2.0,
         k_pose: float = 2.0,
         min_pose_margin: float = 15.0,
+        k_gaze: float = 2.05,
+        min_gaze_margin: float = 0.055,
     ):
-        self.duration_ms       = duration_seconds  * 1_000.0
-        self.min_valid_ms      = min_valid_seconds * 1_000.0
-        self.k_ear             = k_ear
-        self.k_pose            = k_pose
-        self.min_pose_margin   = min_pose_margin
+        self.duration_ms = duration_seconds * 1_000.0
+        self.min_valid_ms = min_valid_seconds * 1_000.0
+        self.k_ear = k_ear
+        self.k_pose = k_pose
+        self.min_pose_margin = min_pose_margin
+        self.k_gaze = k_gaze
+        self.min_gaze_margin = min_gaze_margin
 
-        self._state            = CalibrationState.IDLE
-        self._start_ms:  Optional[float] = None
-        self._profile:   Optional[CalibrationProfile] = None
+        self._state = CalibrationState.IDLE
+        self._start_ms: Optional[float] = None
+        self._profile: Optional[CalibrationProfile] = None
 
         # Sample buffers (only OK + eyes-open frames)
-        self._ear_samples:      List[float] = []
-        self._blink_durations:  List[float] = []
-        self._yaw_samples:      List[float] = []
-        self._pitch_samples:    List[float] = []
-        self._roll_samples:     List[float] = []
+        self._ear_samples: List[float] = []
+        self._blink_durations: List[float] = []
+        self._yaw_samples: List[float] = []
+        self._pitch_samples: List[float] = []
+        self._roll_samples: List[float] = []
+        self._gaze_right_t: List[float] = []
+        self._gaze_left_t: List[float] = []
 
     # ─── public API ──────────────────────────────────────────────────────────
 
@@ -138,6 +155,8 @@ class CalibrationSession:
         self._yaw_samples.clear()
         self._pitch_samples.clear()
         self._roll_samples.clear()
+        self._gaze_right_t.clear()
+        self._gaze_left_t.clear()
 
     def update(
         self,
@@ -172,6 +191,19 @@ class CalibrationSession:
                 self._yaw_samples.append(detection.head_pose.yaw)
                 self._pitch_samples.append(detection.head_pose.pitch)
                 self._roll_samples.append(detection.head_pose.roll)
+
+            # Взгляд на экран: оба глаза открыты, голова фронтально
+            hp = detection.head_pose
+            if (
+                metrics.state_left == EyeState.OPEN
+                and metrics.state_right == EyeState.OPEN
+                and detection.gaze_iris_t is not None
+                and hp is not None
+                and hp.is_frontal(22.0, 22.0)
+            ):
+                tr, tl = detection.gaze_iris_t
+                self._gaze_right_t.append(tr)
+                self._gaze_left_t.append(tl)
 
         # ── check completion ──────────────────────────────────────────────────
         if elapsed >= self.duration_ms:
@@ -323,6 +355,25 @@ class CalibrationSession:
             lo=10.0, hi=35.0,
         )
 
+        gaze_mr = gaze_ml = 0.5
+        gaze_thresh = 1.0
+        gaze_on = False
+        n_gaze = min(len(self._gaze_right_t), len(self._gaze_left_t))
+        if n_gaze >= 35:
+            gr = np.array(self._gaze_right_t[:n_gaze], dtype=np.float64)
+            gl = np.array(self._gaze_left_t[:n_gaze], dtype=np.float64)
+            gaze_mr = float(np.mean(gr))
+            gaze_ml = float(np.mean(gl))
+            std_r = float(np.std(gr))
+            std_l = float(np.std(gl))
+            pooled = max(std_r, std_l, 0.018)
+            gaze_thresh = _clamp(
+                self.k_gaze * pooled + self.min_gaze_margin,
+                lo=0.09,
+                hi=0.32,
+            )
+            gaze_on = True
+
         return CalibrationProfile(
             ear_mean=ear_mean,
             ear_std=ear_std,
@@ -338,6 +389,10 @@ class CalibrationSession:
             yaw_threshold=yaw_thresh,
             pitch_threshold=pitch_thresh,
             roll_threshold=roll_thresh,
+            gaze_t_mean_right=gaze_mr,
+            gaze_t_mean_left=gaze_ml,
+            gaze_threshold=gaze_thresh,
+            gaze_enabled=gaze_on,
             sample_count=len(self._ear_samples),
             duration_ms=self.duration_ms,
         )

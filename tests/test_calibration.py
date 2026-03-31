@@ -236,6 +236,10 @@ class TestApplyCalibration(unittest.TestCase):
             yaw_mean=5.0, pitch_mean=-3.0, roll_mean=1.0,
             pose_std=3.0,
             yaw_threshold=25.0, pitch_threshold=22.0, roll_threshold=18.0,
+            gaze_t_mean_right=0.5,
+            gaze_t_mean_left=0.5,
+            gaze_threshold=1.0,
+            gaze_enabled=False,
             sample_count=500, duration_ms=45_000.0,
         )
 

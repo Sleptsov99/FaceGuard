@@ -15,6 +15,15 @@ LEFT_EYE_CONTOUR = [362, 382, 381, 380, 374, 373, 390, 249, 263, 466, 388, 387, 
 RIGHT_EYE_EAR = [33, 160, 158, 133, 153, 144]
 LEFT_EYE_EAR  = [263, 387, 385, 362, 380, 373]
 
+# Iris centers (478-point refined mesh) — для персональной калибровки взгляда
+RIGHT_EYE_IRIS_CENTER = 468
+LEFT_EYE_IRIS_CENTER = 473
+# Углы глаза для оси «взгляд вдоль раскрытия века»
+RIGHT_EYE_OUTER = 33
+RIGHT_EYE_INNER = 133
+LEFT_EYE_OUTER = 263
+LEFT_EYE_INNER = 362
+
 # Head pose (6 keypoints for solvePnP): nose-tip, chin, L-eye-outer, R-eye-outer, L-mouth, R-mouth
 POSE_KEYPOINTS = [4, 152, 263, 33, 287, 57]
 

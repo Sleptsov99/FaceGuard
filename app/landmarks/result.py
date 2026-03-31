@@ -46,6 +46,8 @@ class DetectionResult:
     left_eye: Optional[EyeLandmarks] = None
     head_pose: Optional[HeadPose] = None
     raw_landmarks: Optional[Any] = None  # MediaPipe NormalizedLandmarkList
+    # Проекция центра радужки на ось outer→inner, нормированная в [0, 1] (0 у внешнего угла)
+    gaze_iris_t: Optional[Tuple[float, float]] = None  # (right_eye_t, left_eye_t)
 
     @property
     def face_found(self) -> bool:
