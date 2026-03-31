@@ -43,8 +43,8 @@ class BlinkDetector:
 
     def __init__(
         self,
-        ear_threshold: float          = 0.20,
-        min_blink_duration_ms: float  = 50.0,
+        ear_threshold: float          = 0.23,
+        min_blink_duration_ms: float  = 30.0,
         max_blink_duration_ms: float  = 800.0,
         long_blink_threshold_ms: float = 400.0,
         min_frames_closed: int        = 1,   # debounce: frames below threshold to start

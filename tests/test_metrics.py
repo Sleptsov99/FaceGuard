@@ -227,14 +227,18 @@ class TestMetricsCalculator(unittest.TestCase):
         m1 = calc.update(make_detection(0.30, 0.30), timestamp_ms=base)
         self.assertFalse(m1.blink_detected)
 
-        # Frame 2: eyes close — EMA = 0.5*0.0 + 0.5*0.30 = 0.15 < 0.20 → blink starts
+        # Frame 2: eyes close — EMA = 0.5*0.0 + 0.5*0.30 = 0.15 < 0.23 → blink starts
         m2 = calc.update(make_detection(0.0, 0.0), timestamp_ms=base + 100)
         self.assertFalse(m2.blink_detected)   # blink not complete yet
 
-        # Frame 3: eyes reopen — EMA rises above 0.20 → blink completes
+        # Frame 3: eyes reopen — EMA = 0.5*0.30 + 0.5*0.15 = 0.225 still < 0.23
         m3 = calc.update(make_detection(0.30, 0.30), timestamp_ms=base + 250)
-        self.assertTrue(m3.blink_detected)
-        self.assertGreater(m3.blink_duration_ms, 0)
+        self.assertFalse(m3.blink_detected)
+
+        # Frame 4: EMA = 0.5*0.30 + 0.5*0.225 = 0.263 > 0.23 → blink completes
+        m4 = calc.update(make_detection(0.30, 0.30), timestamp_ms=base + 280)
+        self.assertTrue(m4.blink_detected)
+        self.assertGreater(m4.blink_duration_ms, 0)
 
     def test_no_blink_when_always_open(self):
         for _ in range(10):

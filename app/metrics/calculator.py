@@ -40,7 +40,7 @@ _LEVEL_LABEL = {
 class MetricsCalculator:
     def __init__(
         self,
-        ema_alpha: float               = 0.15,
+        ema_alpha: float               = 0.25,
         baseline_window_seconds: float = 4.0,
         long_blink_threshold_ms: float = 400.0,
     ):
@@ -171,6 +171,13 @@ class MetricsCalculator:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2, cv2.LINE_AA)
 
         return frame
+
+    def apply_calibration(self, profile: "CalibrationProfile"):  # type: ignore[name-defined]
+        """Apply personal thresholds from a completed calibration session."""
+        self._blink.ear_threshold          = profile.ear_blink_threshold
+        self._blink.long_blink_threshold_ms = profile.long_blink_threshold_ms
+        self._perclos.closed_threshold      = profile.ear_closed_threshold
+        self._fatigue.normal_blink_ms       = profile.blink_duration_mean_ms
 
     def reset(self):
         self._smoother.reset()

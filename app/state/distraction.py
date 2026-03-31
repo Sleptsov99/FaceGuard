@@ -93,6 +93,11 @@ class DistractionTracker:
         self.roll_threshold   = roll_threshold
         self.confidence_gate  = confidence_gate
 
+        # Personal baseline (updated by apply_calibration)
+        self._yaw_mean:   float = 0.0
+        self._pitch_mean: float = 0.0
+        self._roll_mean:  float = 0.0
+
         self._face_absent_since_ms: Optional[float] = None
 
     # ─── public API ──────────────────────────────────────────────────────────
@@ -138,13 +143,18 @@ class DistractionTracker:
         pitch = pose.pitch if pose else 0.0
         roll  = pose.roll  if pose else 0.0
 
+        # Deviation from personal baseline (0.0 before calibration → same as raw angle)
+        yaw_dev   = abs(yaw   - self._yaw_mean)
+        pitch_dev = abs(pitch - self._pitch_mean)
+        roll_dev  = abs(roll  - self._roll_mean)
+
         is_looking_away = (
             face_present and pose is not None
-            and (abs(yaw) > self.yaw_threshold or abs(pitch) > self.pitch_threshold)
+            and (yaw_dev > self.yaw_threshold or pitch_dev > self.pitch_threshold)
         )
         is_head_tilted = (
             face_present and pose is not None
-            and abs(roll) > self.roll_threshold
+            and roll_dev > self.roll_threshold
         )
 
         # ── distraction score + reason ────────────────────────────────────────
@@ -155,10 +165,10 @@ class DistractionTracker:
             score  = 0.0
             reason = DistractionReason.LOW_CONFIDENCE
         elif is_looking_away:
-            score  = self._pose_score(yaw, pitch, roll)
+            score  = self._pose_score(yaw_dev, pitch_dev, roll_dev)
             reason = DistractionReason.LOOKING_AWAY
         elif is_head_tilted:
-            score  = self._pose_score(yaw, pitch, roll)
+            score  = self._pose_score(yaw_dev, pitch_dev, roll_dev)
             reason = DistractionReason.HEAD_TILTED
         else:
             score  = 0.0
@@ -234,19 +244,33 @@ class DistractionTracker:
 
         return frame
 
+    def apply_calibration(self, profile: "CalibrationProfile"):  # type: ignore[name-defined]
+        """Apply personal head-pose thresholds from a calibration session.
+
+        DistractionTracker compares |yaw - yaw_mean| against yaw_threshold,
+        so we store the personal mean and use it in _pose_score().
+        """
+        self._yaw_mean      = profile.yaw_mean
+        self._pitch_mean    = profile.pitch_mean
+        self._roll_mean     = profile.roll_mean
+        self.yaw_threshold  = profile.yaw_threshold
+        self.pitch_threshold = profile.pitch_threshold
+        self.roll_threshold  = profile.roll_threshold
+
     def reset(self):
         self._face_absent_since_ms = None
 
     # ─── private ─────────────────────────────────────────────────────────────
 
-    def _pose_score(self, yaw: float, pitch: float, roll: float) -> float:
+    def _pose_score(self, yaw_dev: float, pitch_dev: float, roll_dev: float) -> float:
         """
         Normalized [0, 1] deviation beyond the threshold.
+        Inputs are already |angle - personal_mean|.
         Score=0 at threshold, score=1 at 2× threshold.
         """
-        yaw_excess   = max(0.0, abs(yaw)   - self.yaw_threshold)
-        pitch_excess = max(0.0, abs(pitch) - self.pitch_threshold)
-        roll_excess  = max(0.0, abs(roll)  - self.roll_threshold)
+        yaw_excess   = max(0.0, yaw_dev   - self.yaw_threshold)
+        pitch_excess = max(0.0, pitch_dev - self.pitch_threshold)
+        roll_excess  = max(0.0, roll_dev  - self.roll_threshold)
 
         yaw_s   = min(yaw_excess   / self.yaw_threshold,   1.0)
         pitch_s = min(pitch_excess / self.pitch_threshold, 1.0)
