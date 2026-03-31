@@ -1,5 +1,6 @@
 """
-MediaPipe FaceMesh landmark index constants (478 points, refine_landmarks=True).
+Landmark index constants for the 478-point refined face mesh topology
+(MediaPipe Face Mesh / Face Landmarker Tasks — same indexing).
 All indices are from the person's perspective (left/right = person's left/right).
 """
 

@@ -6,6 +6,7 @@ Usage:
     python app/main.py --source camera --mode ws
     python app/main.py --source camera --mode both
     python app/main.py --source video --path <video_file>
+    python app/main.py --source camera --headless   # pipeline only, no OpenCV window
     python app/main.py --source camera --log session1 --plot
     python app/main.py --source camera --record out.avi
 
@@ -22,6 +23,8 @@ Debug flags:
 Terminal commands (type + Enter):
     c  — start / restart calibration session
     q  — quit
+
+--headless uses EngineSession (no calibration / WebSocket / logging integration).
 """
 
 import argparse
@@ -36,6 +39,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.camera.capture import CameraCapture
+from app.engine.session import EngineSession
 from app.landmarks.detector import LandmarkDetector
 from app.metrics.calculator import MetricsCalculator
 from app.state.distraction import DistractionTracker
@@ -68,26 +72,26 @@ def _start_stdin_reader() -> queue.SimpleQueue:
 
 
 def run(
-    capture:    CameraCapture,
-    detector:   LandmarkDetector,
-    mode:       str,
-    ws_port:    int,
-    log_stem:   Optional[str],
-    do_plot:    bool,
+    capture: CameraCapture,
+    detector: LandmarkDetector,
+    mode: str,
+    ws_port: int,
+    log_stem: Optional[str],
+    do_plot: bool,
     record_path: Optional[str],
 ):
-    calculator  = MetricsCalculator()
+    calculator = MetricsCalculator()
     distraction = DistractionTracker()
     calibration = CalibrationSession(duration_seconds=45.0)
-    cv_state    = CVStateEstimator()
-    stdin_q     = _start_stdin_reader()
+    cv_state = CVStateEstimator()
+    stdin_q = _start_stdin_reader()
 
     show_window = mode in ("window", "both")
 
     # ── optional debug components ─────────────────────────────────────────────
-    logger:   Optional[MetricsLogger]  = MetricsLogger(log_stem) if log_stem else None
-    plotter:  Optional[MetricsPlotter] = MetricsPlotter(show_window=True) if do_plot else None
-    writer:   Optional[cv2.VideoWriter] = None   # initialised on first frame
+    logger: Optional[MetricsLogger] = MetricsLogger(log_stem) if log_stem else None
+    plotter: Optional[MetricsPlotter] = MetricsPlotter(show_window=True) if do_plot else None
+    writer: Optional[cv2.VideoWriter] = None   # initialised on first frame
 
     # ── WebSocket server ──────────────────────────────────────────────────────
     ws: Optional[WebSocketServer] = None
@@ -123,10 +127,10 @@ def run(
         ts = time.time() * 1_000.0
 
         detection = detector.detect(frame)
-        metrics   = calculator.update(detection, timestamp_ms=ts)
-        distr     = distraction.update(detection, timestamp_ms=ts)
-        state     = cv_state.estimate(metrics, distr)
-        quality   = compute_quality_flags(detection, metrics)
+        metrics = calculator.update(detection, timestamp_ms=ts)
+        distr = distraction.update(detection, timestamp_ms=ts)
+        state = cv_state.estimate(metrics, distr)
+        quality = compute_quality_flags(detection, metrics)
 
         # Feed calibration if running
         if calibration.state == CalibrationState.RUNNING:
@@ -182,9 +186,9 @@ def run(
         # ── terminal commands ─────────────────────────────────────────────────
         while not stdin_q.empty():
             ch = stdin_q.get()
-            if ch == 'q':
+            if ch == "q":
                 quit_flag = True
-            elif ch == 'c':
+            elif ch == "c":
                 print("Calibration started — look at the screen normally")
                 calibration.start(timestamp_ms=ts)
                 if ws:
@@ -224,18 +228,23 @@ def _draw_quality(frame, quality):
 
 def main():
     parser = argparse.ArgumentParser(description="CV Engine")
-    parser.add_argument("--source",   choices=["camera", "video"], default="camera")
-    parser.add_argument("--path",     type=str, default=None,
+    parser.add_argument("--source", choices=["camera", "video"], default="camera")
+    parser.add_argument("--path", type=str, default=None,
                         help="Path to video file (--source video)")
-    parser.add_argument("--mode",     choices=["window", "ws", "both"], default="window",
-                        help="Output mode (default: window)")
-    parser.add_argument("--ws-port",  type=int, default=8765)
-    parser.add_argument("--log",      type=str, default=None, metavar="STEM",
+    parser.add_argument("--mode", choices=["window", "ws", "both"], default="window",
+                        help="Output mode (default: window); ignored with --headless")
+    parser.add_argument("--ws-port", type=int, default=8765)
+    parser.add_argument("--log", type=str, default=None, metavar="STEM",
                         help="Enable CSV/JSONL logging, e.g. --log session1")
-    parser.add_argument("--plot",     action="store_true",
+    parser.add_argument("--plot", action="store_true",
                         help="Show rolling metrics graph window")
-    parser.add_argument("--record",   type=str, default=None, metavar="FILE",
+    parser.add_argument("--record", type=str, default=None, metavar="FILE",
                         help="Save video with overlay, e.g. --record out.avi")
+    parser.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run EngineSession without OpenCV UI (no WS/calibration/plot in this path)",
+    )
     args = parser.parse_args()
 
     if args.source == "video":
@@ -245,6 +254,14 @@ def main():
         source = args.path
     else:
         source = 0
+
+    if args.headless:
+        session = EngineSession(source)
+        try:
+            session.run_loop(preview=False)
+        finally:
+            session.release()
+        return
 
     run(
         CameraCapture(source=source),

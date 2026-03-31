@@ -1,0 +1,2 @@
+# Downloaded MediaPipe task model (auto-fetched on first LandmarkDetector init)
+app/landmarks/data/*.task

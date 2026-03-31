@@ -1,5 +1,19 @@
+# PEP 517: без setuptools в окружении sdist (старый numpy под py313) падает с BackendUnavailable.
+setuptools>=69.0; python_version >= "3.13"
+wheel; python_version >= "3.13"
+
 opencv-python>=4.8.0
-mediapipe>=0.10.0
-numpy>=1.23.5,<2.0.0
-scipy>=1.10.0
-ml-dtypes~=0.3.1
+PySide6>=6.6.0
+# Windows: системные Toast (desktop_app/native_notify.py)
+windows-toasts>=1.3.0; platform_system == "Windows"
+winotify>=1.0.4; platform_system == "Windows"
+# 0.10.30+ wheels drop mp.solutions; detector uses Tasks FaceLandmarker instead.
+mediapipe>=0.10.30
+# На Python 3.13 у numpy 1.x нет колёс → pip тянет sdist и долго/ломается; нужен numpy 2.x с wheel.
+numpy>=1.23.5,<2.0.0; python_version < "3.13"
+numpy>=2.1.0; python_version >= "3.13"
+scipy>=1.10.0; python_version < "3.13"
+scipy>=1.14.0; python_version >= "3.13"
+# >=0.5.1: required by TensorFlow 2.20+ if present in the same env (ml_dtypes.int2).
+# Older pin (~=0.3.1) breaks TF and can crash on `import mediapipe` when TF is installed.
+ml-dtypes>=0.5.1,<1.0.0
