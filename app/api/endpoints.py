@@ -1,16 +1,16 @@
 """API endpoints module (placeholder for future REST API)."""
 
-from typing import Dict, Any
+from typing import Dict ,Any 
 
 
-class APIEndpoints:
+class APIEndpoints :
     """API endpoints for CV Engine."""
-    
-    def __init__(self):
+
+    def __init__ (self ):
         """Initialize API endpoints."""
-        pass
-    
-    def get_status(self) -> Dict[str, Any]:
+        pass 
+
+    def get_status (self )->Dict [str ,Any ]:
         """
         Get current engine status.
         
@@ -18,11 +18,11 @@ class APIEndpoints:
             Status dictionary
         """
         return {
-            "status": "ok",
-            "version": "0.1.0"
+        "status":"ok",
+        "version":"0.1.0"
         }
-    
-    def get_metrics(self) -> Dict[str, Any]:
+
+    def get_metrics (self )->Dict [str ,Any ]:
         """
         Get current metrics.
         
@@ -30,5 +30,5 @@ class APIEndpoints:
             Metrics dictionary
         """
         return {
-            "metrics": {}
+        "metrics":{}
         }
