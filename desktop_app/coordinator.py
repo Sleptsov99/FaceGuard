@@ -36,7 +36,7 @@ class DesktopCoordinator (QObject ):
         coordinator =self ,
         quiet_modal_errors =True ,
         )
-        self ._dashboard .resize (580 ,680 )
+        self ._dashboard .resize (820 ,680 )
 
         self ._tray =QSystemTrayIcon (self )
         self ._tray .setIcon (self ._default_icon ())

@@ -75,10 +75,10 @@ class EngineThread (QThread ):
             blink_total :int ,
             closure_streak_ms :float ,
             )->Dict [str ,Any ]:
-                d =result .detection 
-                m =result .metrics 
-                r =result .distraction 
-                cs =result .calibration_state 
+                d =result .detection
+                m =result .metrics
+                r =result .distraction
+                em =result .emotion
                 payload :Dict [str ,Any ]={
                 "frame_index":result .frame_index ,
                 "detection_status":d .status .value ,
@@ -97,10 +97,14 @@ class EngineThread (QThread ):
                 "closure_streak_ms":closure_streak_ms ,
                 "state_left":m .state_left .name if m else None ,
                 "state_right":m .state_right .name if m else None ,
-                "calibration_state":cs .value if cs is not None else None ,
-                "calibration_progress":float (result .calibration_progress ),
+                "emotion":em .emotion .value if em is not None else None ,
+                "emotion_confidence":float (em .confidence )if em is not None else 0.0 ,
+                "emotion_scores":(
+                {e .value :float (v )for e ,v in em .scores .items ()}
+                if em is not None else {}
+                ),
                 }
-                return payload 
+                return payload
 
             self ._stop_requested =False 
             session =None 
@@ -110,7 +114,7 @@ class EngineThread (QThread ):
             policy =AlertPolicy (cooldown_s =45.0 )
 
             try :
-                session =EngineSession (self ._camera_source )
+                session =EngineSession (self ._camera_source ,auto_calibration =False )
             except Exception as e :
                 self .failed .emit (str (e ))
                 self .finished_clean .emit ()
@@ -122,7 +126,7 @@ class EngineThread (QThread ):
                         time .sleep (0.05 )
                         continue 
 
-                    result =session .read_and_process (draw_overlays =True )
+                    result =session .read_and_process (draw_overlays =False )
                     if result is None :
                         break 
 

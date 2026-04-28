@@ -9,11 +9,13 @@ from typing import TYPE_CHECKING ,Any ,Dict ,Optional
 from PySide6 .QtCore import Qt ,QSize 
 from PySide6 .QtGui import QCloseEvent ,QImage ,QPixmap ,QResizeEvent 
 from PySide6 .QtWidgets import (
+QFrame ,
 QHBoxLayout ,
 QLabel ,
 QMainWindow ,
 QMessageBox ,
 QPlainTextEdit ,
+QProgressBar ,
 QPushButton ,
 QSizePolicy ,
 QVBoxLayout ,
@@ -41,7 +43,12 @@ class MainWindow (QMainWindow ):
 
         central =QWidget ()
         self .setCentralWidget (central )
-        layout =QVBoxLayout (central )
+        outer =QHBoxLayout (central )
+        left =QWidget ()
+        layout =QVBoxLayout (left )
+        layout .setContentsMargins (0 ,0 ,0 ,0 )
+        outer .addWidget (left ,stretch =1 )
+        outer .addWidget (self ._build_emotions_panel ())
 
         row =QHBoxLayout ()
         self ._btn_start =QPushButton ("Запустить мониторинг")
@@ -70,21 +77,17 @@ class MainWindow (QMainWindow ):
         self ._lbl_status =QLabel ("Engine: —")
         self ._lbl_blink =QLabel ("Blinks (total): 0")
         self ._lbl_detection =QLabel ("Detection: —")
-        self ._lbl_calibration =QLabel ("Калибровка: —")
         self ._lbl_fatigue_distraction =QLabel ("Fatigue / distraction: —")
-        self ._calibration_done =False 
         for w in (
         self ._lbl_status ,
         self ._lbl_blink ,
         self ._lbl_detection ,
-        self ._lbl_calibration ,
         self ._lbl_fatigue_distraction ,
         ):
             w .setTextInteractionFlags (Qt .TextSelectableByMouse )
         layout .addWidget (self ._lbl_status )
         layout .addWidget (self ._lbl_blink )
         layout .addWidget (self ._lbl_detection )
-        layout .addWidget (self ._lbl_calibration )
         layout .addWidget (self ._lbl_fatigue_distraction )
 
         self ._alert_banner =QLabel ("")
@@ -107,6 +110,57 @@ class MainWindow (QMainWindow ):
         if coordinator 
         else "Нажмите «Запустить мониторинг»."
         )
+
+    _EMOTIONS =(
+    ("neutral","Нейтрально","#b4b4b4"),
+    ("happy","Радость","#00dc00"),
+    ("sad","Грусть","#3264c8"),
+    ("surprised","Удивление","#ffc800"),
+    ("angry","Злость","#dc3200"),
+    ("fearful","Страх","#c800b4"),
+    )
+
+    def _build_emotions_panel (self )->QWidget :
+        panel =QFrame ()
+        panel .setFrameShape (QFrame .Shape .StyledPanel )
+        panel .setFixedWidth (220 )
+        v =QVBoxLayout (panel )
+
+        title =QLabel ("Эмоции")
+        title .setStyleSheet ("QLabel { font-weight: bold; font-size: 14px; }")
+        v .addWidget (title )
+
+        self ._lbl_current_emotion =QLabel ("—")
+        self ._lbl_current_emotion .setAlignment (Qt .AlignCenter )
+        self ._lbl_current_emotion .setStyleSheet (
+        "QLabel { font-size: 16px; font-weight: bold; "
+        "padding: 8px; border: 1px solid #444; border-radius: 4px; "
+        "background-color: #1e1e1e; color: #ddd; }"
+        )
+        v .addWidget (self ._lbl_current_emotion )
+
+        self ._emotion_bars :Dict [str ,QProgressBar ]={}
+        for key ,label ,colour in self ._EMOTIONS :
+            row_lbl =QLabel (label )
+            row_lbl .setStyleSheet (f"QLabel {{ color: {colour }; font-size: 11px; }}")
+            v .addWidget (row_lbl )
+            bar =QProgressBar ()
+            bar .setRange (0 ,100 )
+            bar .setValue (0 )
+            bar .setTextVisible (True )
+            bar .setFormat ("%p%")
+            bar .setFixedHeight (14 )
+            bar .setStyleSheet (
+            "QProgressBar { border: 1px solid #444; border-radius: 3px; "
+            "background-color: #1e1e1e; text-align: center; color: #eee; "
+            "font-size: 10px; }"
+            f"QProgressBar::chunk {{ background-color: {colour }; }}"
+            )
+            v .addWidget (bar )
+            self ._emotion_bars [key ]=bar
+
+        v .addStretch ()
+        return panel
 
     def show_normal (self )->None :
         self .show ()
@@ -157,7 +211,6 @@ class MainWindow (QMainWindow ):
             return 
 
     def on_engine_started (self )->None :
-        self ._calibration_done =False 
         self ._btn_start .setEnabled (False )
         self ._btn_stop .setEnabled (True )
         self ._lbl_status .setText ("Engine: running")
@@ -167,22 +220,20 @@ class MainWindow (QMainWindow ):
         self ._append_log ("Мониторинг запущен.")
 
     def on_engine_stopped (self )->None :
-        self ._calibration_done =False 
         self ._btn_start .setEnabled (True )
         self ._btn_stop .setEnabled (False )
         self ._lbl_status .setText ("Engine: idle")
-        self ._lbl_calibration .setText ("Калибровка: —")
         self ._clear_preview ()
+        self ._reset_emotions ()
         self ._append_log ("Мониторинг остановлен.")
 
     def on_worker_thread_finished (self )->None :
         """Worker ended on its own (camera lost, error path, etc.)."""
-        self ._calibration_done =False 
         self ._btn_start .setEnabled (True )
         self ._btn_stop .setEnabled (False )
         self ._lbl_status .setText ("Engine: остановлено")
-        self ._lbl_calibration .setText ("Калибровка: —")
         self ._clear_preview ()
+        self ._reset_emotions ()
         self ._append_log ("Поток движка завершён.")
 
     def on_preview_frame (self ,img :QImage )->None :
@@ -211,29 +262,41 @@ class MainWindow (QMainWindow ):
         f"reason: {payload ['distraction_reason']}\n"
         f"Eyes: {eyes }  closure_streak: {payload .get ('closure_streak_ms',0 ):.0f} ms"
         )
-        cs =payload .get ("calibration_state")
-        cp =float (payload .get ("calibration_progress")or 0.0 )
-        if cs =="running":
-            self ._lbl_calibration .setText (
-            f"Калибровка (~30 с): {int (cp *100 )}% — смотрите в экран, не отворачивайтесь"
-            )
-        elif cs =="done":
-            self ._calibration_done =True 
-            self ._lbl_calibration .setText (
-            "Калибровка: завершена. Пороги усталости и взгляда персональные."
-            )
-        elif cs =="failed":
-            self ._lbl_calibration .setText (
-            "Калибровка: мало валидных кадров. Стандартные пороги."
-            )
-        elif self ._calibration_done :
-            self ._lbl_calibration .setText ("Калибровка: применена")
-        else :
-            self ._lbl_calibration .setText ("Калибровка: —")
+        self ._update_emotions (payload )
         if payload .get ("blink_this_frame"):
             self ._append_log (
             f"Frame {payload ['frame_index']}: blink (total {payload ['blink_total']})"
             )
+
+    def _update_emotions (self ,payload :Dict [str ,Any ])->None :
+        scores =payload .get ("emotion_scores")or {}
+        for key ,_label ,_colour in self ._EMOTIONS :
+            v =float (scores .get (key ,0.0 ))
+            self ._emotion_bars [key ].setValue (max (0 ,min (100 ,int (round (v *100 )))))
+        current =payload .get ("emotion")
+        conf =float (payload .get ("emotion_confidence")or 0.0 )
+        if current :
+            label =next (
+            (lbl for key ,lbl ,_ in self ._EMOTIONS if key ==current ),
+            current ,
+            )
+            colour =next (
+            (c for key ,_ ,c in self ._EMOTIONS if key ==current ),
+            "#dddddd",
+            )
+            self ._lbl_current_emotion .setText (f"{label }  ({conf *100 :.0f}%)")
+            self ._lbl_current_emotion .setStyleSheet (
+            "QLabel { font-size: 16px; font-weight: bold; "
+            "padding: 8px; border: 1px solid #444; border-radius: 4px; "
+            f"background-color: #1e1e1e; color: {colour }; }}"
+            )
+        else :
+            self ._lbl_current_emotion .setText ("—")
+
+    def _reset_emotions (self )->None :
+        for bar in self ._emotion_bars .values ():
+            bar .setValue (0 )
+        self ._lbl_current_emotion .setText ("—")
 
     def on_alert_dict (self ,alert :Dict [str ,Any ])->None :
         msg =alert .get ("message","")

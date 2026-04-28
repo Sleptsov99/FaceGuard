@@ -86,7 +86,7 @@ class EmotionDetector:
         if detection.raw_landmarks is None:
             return None
 
-        lm = detection.raw_landmarks.landmark
+        lm = detection.raw_landmarks
 
         face_h = abs(lm[_CHIN].y - lm[_FOREHEAD].y)
         if face_h < 0.01:
@@ -98,9 +98,12 @@ class EmotionDetector:
         mar     = lip_v / max(mouth_w, 0.01)
 
         # ── smile score ───────────────────────────────────────────────────
-        # y ↓ in image coords → corners above lip centre → smile (+), below → frown (-)
-        lip_cy   = (lm[_LIP_OUT_TOP].y + lm[_LIP_OUT_BOT].y) * 0.5
-        corner_y = (lm[_MOUTH_R].y     + lm[_MOUTH_L].y)      * 0.5
+        # Reference is the inner lip seal (mid of 13/14), not the outer
+        # outline (0/17): the outer midpoint is biased downward when the
+        # lower lip is thicker than the upper, which makes a relaxed
+        # mouth read as a permanent smile.
+        lip_cy   = (lm[_LIP_IN_TOP].y + lm[_LIP_IN_BOT].y) * 0.5
+        corner_y = (lm[_MOUTH_R].y    + lm[_MOUTH_L].y)    * 0.5
         smile    = (lip_cy - corner_y) / face_h
 
         # ── brow raise ────────────────────────────────────────────────────
@@ -165,10 +168,10 @@ class EmotionDetector:
         angry_brow = _sigmoid((brow_tilt  - 0.02)  * 80)   # 0.17 neutral → 0.83 angry
 
         # ── emotion scores ────────────────────────────────────────────────────
-        # Double-sigmoid for happy/sad: near zero → low score; above threshold → rises fast.
-        # This lets the function stay low at neutral (smile≈0) and respond at ±0.015+.
-        happy = _sigmoid((smile  - 0.012) * 70) * _sigmoid((smile  - 0.002) * 50)
-        sad   = _sigmoid((-smile - 0.012) * 70) * _sigmoid((-smile - 0.002) * 50)
+        # Double-sigmoid keeps happy/sad near zero on a relaxed mouth and
+        # only rises once smile crosses the noise floor (~0.012+ either side).
+        happy = _sigmoid((smile  - 0.018) * 110) * _sigmoid((smile  - 0.008) * 80)
+        sad   = _sigmoid((-smile - 0.018) * 110) * _sigmoid((-smile - 0.008) * 80)
 
         surprised = mouth_open * brow_up
 

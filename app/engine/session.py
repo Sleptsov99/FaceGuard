@@ -13,13 +13,15 @@ from typing import Callable ,Optional ,Tuple ,Union
 import cv2 
 import numpy as np 
 
-from app .camera .capture import CameraCapture 
-from app .landmarks .detector import LandmarkDetector 
-from app .landmarks .result import DetectionResult ,DetectionStatus ,HeadPose 
-from app .metrics .calculator import MetricsCalculator 
-from app .metrics .result import EyeMetrics 
-from app .state .calibration import CalibrationSession ,CalibrationState 
-from app .state .distraction import DistractionResult ,DistractionTracker 
+from app .camera .capture import CameraCapture
+from app .emotions .detector import EmotionDetector
+from app .emotions .result import EmotionResult
+from app .landmarks .detector import LandmarkDetector
+from app .landmarks .result import DetectionResult ,DetectionStatus ,HeadPose
+from app .metrics .calculator import MetricsCalculator
+from app .metrics .result import EyeMetrics
+from app .state .calibration import CalibrationSession ,CalibrationState
+from app .state .distraction import DistractionResult ,DistractionTracker
 
 
 @dataclass 
@@ -39,11 +41,12 @@ class FrameProcessingResult :
     frame :np .ndarray 
     detection :DetectionSummary 
     metrics :Optional [EyeMetrics ]
-    distraction :DistractionResult 
-    timestamp_ms :float 
-    frame_index :int 
-    calibration_state :Optional [CalibrationState ]=None 
-    calibration_progress :float =0.0 
+    distraction :DistractionResult
+    timestamp_ms :float
+    frame_index :int
+    calibration_state :Optional [CalibrationState ]=None
+    calibration_progress :float =0.0
+    emotion :Optional [EmotionResult ]=None
 
 
 def _summarize_detection (result :DetectionResult )->DetectionSummary :
@@ -75,7 +78,8 @@ class EngineSession :
         self ._detector =LandmarkDetector ()
         self ._calculator =MetricsCalculator ()
         self ._distraction =DistractionTracker ()
-        self ._frame_index =0 
+        self ._emotions =EmotionDetector ()
+        self ._frame_index =0
         self ._calibration :Optional [CalibrationSession ]=None 
         if auto_calibration :
             self ._calibration =CalibrationSession (
@@ -124,6 +128,7 @@ class EngineSession :
 
         detection =self ._detector .detect (frame )
         metrics =self ._calculator .update (detection ,timestamp_ms =ts )
+        emotion =self ._emotions .detect (detection )
 
         cal_state :Optional [CalibrationState ]=None 
         cal_progress =0.0 
@@ -160,6 +165,7 @@ class EngineSession :
             self ._detector .draw (frame ,detection )
             self ._calculator .draw (frame ,metrics )
             self ._distraction .draw (frame ,distr )
+            self ._emotions .draw (frame ,emotion )
             if self ._calibration is not None :
                 self ._calibration .draw (frame ,timestamp_ms =ts )
 
@@ -172,6 +178,7 @@ class EngineSession :
         frame_index =idx ,
         calibration_state =cal_state ,
         calibration_progress =cal_progress ,
+        emotion =emotion ,
         )
 
     def run_loop (

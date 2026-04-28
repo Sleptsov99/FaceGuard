@@ -128,7 +128,7 @@ class LandmarkDetector :
             right_eye =self ._eye (lm ,RIGHT_EYE_CONTOUR ,RIGHT_EYE_EAR ,h ,w ),
             left_eye =self ._eye (lm ,LEFT_EYE_CONTOUR ,LEFT_EYE_EAR ,h ,w ),
             head_pose =self ._head_pose (lm ,h ,w ),
-            raw_landmarks =None ,
+            raw_landmarks =lm ,
             gaze_iris_t =gz ,
             )
 
@@ -143,7 +143,7 @@ class LandmarkDetector :
             status =DetectionStatus .FACE_TOO_SMALL ,
             confidence =self ._confidence (bbox ,h ,w ),
             face_bbox =bbox ,
-            raw_landmarks =None ,
+            raw_landmarks =lm ,
             gaze_iris_t =gz ,
             )
 
@@ -162,7 +162,7 @@ class LandmarkDetector :
             right_eye =right_eye ,
             left_eye =left_eye ,
             head_pose =head_pose ,
-            raw_landmarks =None ,
+            raw_landmarks =lm ,
             gaze_iris_t =gz ,
             )
 
@@ -173,7 +173,7 @@ class LandmarkDetector :
         right_eye =right_eye ,
         left_eye =left_eye ,
         head_pose =head_pose ,
-        raw_landmarks =None ,
+        raw_landmarks =lm ,
         gaze_iris_t =gz ,
         )
 
