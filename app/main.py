@@ -49,7 +49,8 @@ from app .api .server import WebSocketServer
 from app .api .serializer import serialize_frame 
 from app .debug .quality import compute_quality_flags 
 from app .debug .logger import MetricsLogger 
-from app .debug .plotter import MetricsPlotter 
+from app .debug .plotter import MetricsPlotter
+from app .emotions .detector import EmotionDetector
 
 
 def _start_stdin_reader ()->queue .SimpleQueue :
@@ -84,6 +85,7 @@ record_path :Optional [str ],
     distraction =DistractionTracker ()
     calibration =CalibrationSession (duration_seconds =30.0 ,min_valid_seconds =12.0 )
     cv_state =CVStateEstimator ()
+    emotions =EmotionDetector ()
     stdin_q =_start_stdin_reader ()
 
     show_window =mode in ("window","both")
@@ -130,6 +132,7 @@ record_path :Optional [str ],
         metrics =calculator .update (detection ,timestamp_ms =ts )
         distr =distraction .update (detection ,timestamp_ms =ts ,metrics =metrics )
         state =cv_state .estimate (metrics ,distr )
+        emotion =emotions .detect (detection )
         quality =compute_quality_flags (detection ,metrics )
 
 
@@ -159,7 +162,7 @@ record_path :Optional [str ],
 
 
         if ws :
-            ws .push (serialize_frame (ts ,state ,metrics ,distr ))
+            ws .push (serialize_frame (ts ,state ,metrics ,distr ,emotion ))
 
 
         if show_window or record_path :
@@ -167,6 +170,7 @@ record_path :Optional [str ],
             calculator .draw (frame ,metrics )
             distraction .draw (frame ,distr )
             cv_state .draw (frame ,state )
+            emotions .draw (frame ,emotion )
             _draw_quality (frame ,quality )
             calibration .draw (frame ,timestamp_ms =ts )
 
