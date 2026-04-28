@@ -6,6 +6,7 @@ from typing import Optional
 from app.metrics.result import EyeMetrics
 from app.state.distraction import DistractionResult
 from app.state.cv_state import CVState
+from app.emotions.result import EmotionResult
 
 
 def serialize_frame(
@@ -13,6 +14,7 @@ def serialize_frame(
     cv_state:     CVState,
     metrics:      Optional[EyeMetrics],
     distraction:  DistractionResult,
+    emotion:      Optional[EmotionResult] = None,
 ) -> str:
     """Serialize one frame snapshot to a JSON string."""
     payload: dict = {
@@ -24,6 +26,8 @@ def serialize_frame(
         "attention":    cv_state.attention.value,
         # ── eye metrics (None when face absent) ───────────────────────────────
         "metrics": _metrics_dict(metrics),
+        # ── emotion ───────────────────────────────────────────────────────────
+        "emotion": _emotion_dict(emotion),
         # ── distraction ───────────────────────────────────────────────────────
         "distraction": {
             "face_present":      distraction.face_present,
@@ -45,6 +49,20 @@ def serialize_frame(
 def serialize_event(event_type: str, **kwargs) -> str:
     """Serialize a control event (session_started, session_stopped, etc.)."""
     return json.dumps({"type": event_type, **kwargs}, separators=(",", ":"))
+
+
+def _emotion_dict(e: Optional[EmotionResult]) -> Optional[dict]:
+    if e is None:
+        return None
+    return {
+        "emotion":           e.emotion.value,
+        "confidence":        round(e.confidence, 3),
+        "scores":            {k.value: round(v, 3) for k, v in e.scores.items()},
+        "mar":        round(e.mar,        4),
+        "smile":      round(e.smile,      4),
+        "brow_raise": round(e.brow_raise, 4),
+        "brow_tilt":  round(e.brow_tilt,  4),
+    }
 
 
 def _metrics_dict(m: Optional[EyeMetrics]) -> Optional[dict]:
